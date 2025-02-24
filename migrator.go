@@ -59,6 +59,14 @@ func (m *Migrator) ParseArgs() {
 		).
 		AddCommand(
 			m.cmd.NewCommand().
+				SetName("list").
+				SetDesc("show migration list").
+				SetFunc(func(cmd *cmd.Cmd) {
+					m.list()
+				}),
+		).
+		AddCommand(
+			m.cmd.NewCommand().
 				SetName("up").
 				SetDesc("up migrations").
 				SetFunc(func(cmd *cmd.Cmd) {
@@ -80,6 +88,39 @@ func (m *Migrator) create() {
 	m.createMigration()
 }
 
+func (m *Migrator) list() {
+	applied := make([]MigrationRecord, 0)
+	m.readMigrationsDir()
+
+	if len(m.migrations) > 0 {
+		m.print("Migrations:\n\n")
+
+		if len(m.cmd.GetFlagValue("url")) > 0 {
+			m.initConnection()
+			applied = m.getAppliedMigrations()
+		}
+
+		for _, migration := range m.migrations {
+			tpl := "%s"
+
+			if len(applied) > 0 {
+				for _, migrationRecord := range applied {
+					if migration.name == migrationRecord.Name {
+						tpl += " - applied"
+					}
+				}
+			}
+
+			m.print(fmt.Sprintf(
+				tpl+"\n",
+				migration.name,
+			))
+		}
+	} else {
+		m.print("migration not founded\n")
+	}
+}
+
 func (m *Migrator) up() {
 	m.readMigrationsDir()
 	m.initConnection()
@@ -92,6 +133,32 @@ func (m *Migrator) down() {
 	m.initConnection()
 	m.createMigrationTable()
 	m.rollbackMigrations()
+}
+
+func (m *Migrator) getAppliedMigrations() []MigrationRecord {
+	applied := make([]MigrationRecord, 0)
+	rows, err := m.db.Query("SELECT * FROM migrations")
+	if err != nil {
+		panic(err)
+	}
+
+	defer rows.Close()
+
+	for rows.Next() {
+		migration := MigrationRecord{}
+		err := rows.Scan(
+			&migration.ID,
+			&migration.Version,
+			&migration.Name,
+			&migration.AppliedAt,
+		)
+		if err != nil {
+			panic(err)
+		}
+		applied = append(applied, migration)
+	}
+
+	return applied
 }
 
 func (m *Migrator) createMigration() {
@@ -117,6 +184,8 @@ func (m *Migrator) createMigration() {
 		if err != nil {
 			log.Printf("%+v\n", err.Error())
 		}
+	} else {
+		m.print("migration name not given\n")
 	}
 }
 
@@ -227,27 +296,7 @@ func (m *Migrator) applyMigration(migration *Migration) {
 }
 
 func (m *Migrator) rollbackMigrations() {
-	applied := make([]MigrationRecord, 0)
-	rows, err := m.db.Query("SELECT * FROM migrations")
-	if err != nil {
-		panic(err)
-	}
-
-	defer rows.Close()
-
-	for rows.Next() {
-		migration := MigrationRecord{}
-		err := rows.Scan(
-			&migration.ID,
-			&migration.Version,
-			&migration.Name,
-			&migration.AppliedAt,
-		)
-		if err != nil {
-			panic(err)
-		}
-		applied = append(applied, migration)
-	}
+	applied := m.getAppliedMigrations()
 
 	rollbackTime := time.Now()
 	for i := len(applied) - 1; i >= 0; i-- {
