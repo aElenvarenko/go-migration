@@ -111,7 +111,7 @@ func (m *Migrator) createMigration() {
 				createTime.Format("20060102150405000"),
 				nameArgument.GetValue(),
 			),
-			[]byte("--- up ---\n--- up ---\n--- down ---\n--- down ---\n"),
+			[]byte("-- up --\n-- up --\n-- down --\n-- down --\n"),
 			os.ModePerm,
 		)
 		if err != nil {
