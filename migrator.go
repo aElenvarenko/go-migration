@@ -1,6 +1,7 @@
 package migration
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"hash/crc32"
@@ -14,9 +15,10 @@ import (
 )
 
 type Migrator struct {
-	db         *sql.DB
-	cmd        *cmd.Cmd
-	migrations []*Migration
+	tableName  string       // Migration table name
+	db         *sql.DB      // Database
+	cmd        *cmd.Cmd     // Cmd
+	migrations []*Migration // Migrations
 }
 
 func NewMigrator() *Migrator {
@@ -47,6 +49,13 @@ func (m *Migrator) ParseArgs() {
 				SetName("url").
 				SetAlias("u").
 				SetDesc("pass connection url"),
+		).
+		AddFlag(
+			m.cmd.NewFlag().
+				SetName("table").
+				SetAlias("t").
+				SetDesc("pass table name for migrations").
+				SetDefaultValue("migrations"),
 		).
 		AddCommand(
 			m.cmd.NewCommand().
@@ -81,7 +90,7 @@ func (m *Migrator) ParseArgs() {
 					m.down()
 				}),
 		).
-		Parse()
+		Parse(nil)
 }
 
 func (m *Migrator) create() {
@@ -137,7 +146,7 @@ func (m *Migrator) down() {
 
 func (m *Migrator) getAppliedMigrations() []MigrationRecord {
 	applied := make([]MigrationRecord, 0)
-	rows, err := m.db.Query("SELECT * FROM migrations")
+	rows, err := m.db.Query(fmt.Sprintf("SELECT * FROM %s", m.tableName))
 	if err != nil {
 		panic(err)
 	}
@@ -214,6 +223,7 @@ func (m *Migrator) initConnection() {
 		panic(err)
 	}
 
+	m.tableName = m.cmd.GetFlagValue("table")
 	m.db = db
 }
 
@@ -225,7 +235,7 @@ func (m *Migrator) createMigrationTable() {
 			"name VARCHAR(255) NOT NULL,"+
 			"applied_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP"+
 			")",
-		"migrations",
+		m.tableName,
 	))
 	if err != nil {
 		panic(err)
@@ -234,7 +244,7 @@ func (m *Migrator) createMigrationTable() {
 
 func (m *Migrator) applyMigrations() {
 	applied := make([]MigrationRecord, 0)
-	rows, err := m.db.Query("SELECT * FROM migrations")
+	rows, err := m.db.Query(fmt.Sprintf("SELECT * FROM %s", m.tableName))
 	if err != nil {
 		panic(err)
 	}
@@ -277,21 +287,41 @@ func (m *Migrator) applyMigrations() {
 
 func (m *Migrator) applyMigration(migration *Migration) {
 	if migration.up != "" {
-		_, err := m.db.Exec(migration.up)
+		ts, err := m.db.BeginTx(context.Background(), nil)
+		if err != nil {
+			m.print("")
+			return
+		}
+
+		defer ts.Rollback()
+
+		_, err = ts.Exec(migration.up)
 		if err != nil {
 			log.Printf("%+v\n", err.Error())
+			return
 		}
+
 		hasher := crc32.NewIEEE()
 		hasher.Write([]byte(migration.name))
 		hashValue := hasher.Sum32()
-		_, err = m.db.Exec(fmt.Sprintf(
-			"INSERT INTO migrations (version, name) VALUES ('%d', '%s')",
+
+		_, err = ts.Exec(fmt.Sprintf(
+			"INSERT INTO %s (version, name) VALUES ('%d', '%s')",
+			m.tableName,
 			hashValue,
 			migration.name,
 		))
 		if err != nil {
 			log.Printf("%+v\n", err.Error())
+			return
 		}
+
+		err = ts.Commit()
+		if err != nil {
+			return
+		}
+	} else {
+		m.print(fmt.Sprintf("%s migration empty\n", migration.name))
 	}
 }
 
@@ -314,17 +344,35 @@ func (m *Migrator) rollbackMigrations() {
 
 func (m *Migrator) rollbackMigration(migration *Migration, migrationRecord *MigrationRecord) {
 	if migration.down != "" {
-		_, err := m.db.Exec(migration.down)
+		ts, err := m.db.BeginTx(context.Background(), nil)
+		if err != nil {
+			return
+		}
+
+		defer ts.Rollback()
+
+		_, err = ts.Exec(migration.down)
 		if err != nil {
 			log.Printf("%+v\n", err.Error())
+			return
 		}
-		_, err = m.db.Exec(fmt.Sprintf(
-			"DELETE FROM migrations WHERE id = %d",
+
+		_, err = ts.Exec(fmt.Sprintf(
+			"DELETE FROM %s WHERE id = %d",
+			m.tableName,
 			migrationRecord.ID,
 		))
 		if err != nil {
 			log.Printf("%+v\n", err.Error())
+			return
 		}
+
+		err = ts.Commit()
+		if err != nil {
+			return
+		}
+	} else {
+		m.print(fmt.Sprintf("%s migration empty\n", migration.name))
 	}
 }
 
