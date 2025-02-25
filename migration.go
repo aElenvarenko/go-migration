@@ -9,25 +9,27 @@ import (
 )
 
 type Migration struct {
-	name     string
-	fileName string
-	up       string
-	down     string
+	name     string // Name
+	fileName string // File name
+	up       string // Up
+	down     string // Down
 }
 
 type MigrationRecord struct {
-	ID        int
-	Version   string
-	Name      string
-	AppliedAt time.Time
+	ID        int       // ID
+	Version   string    // Version
+	Name      string    // Name
+	AppliedAt time.Time // Applied
 }
 
+// Create new Migration instance return pointer to Migration
 func NewMigration(fileName string) *Migration {
 	return &Migration{
 		fileName: fileName,
 	}
 }
 
+// Parse migration file
 func (m *Migration) Parse() {
 	context, err := os.ReadFile(m.fileName)
 	if err != nil {
