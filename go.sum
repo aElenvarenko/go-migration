@@ -1,4 +1,4 @@
-github.com/aElenvarenko/go-cmd v0.0.0-20250223135903-c3274a2015b8 h1:JbWdfuiYKZ68dRM35piUwU2T5sUZTgvi28+VfM44xRk=
-github.com/aElenvarenko/go-cmd v0.0.0-20250223135903-c3274a2015b8/go.mod h1:TfhbxrfTC2JGuuIcpD7M5YqjuIsRgFG7qR5/FU/yRx8=
+github.com/aElenvarenko/go-cmd v0.0.2 h1:Z4EmRDUm2MRJiwfLubUvj6m8BDFpcxMIVIbvNDGbfzs=
+github.com/aElenvarenko/go-cmd v0.0.2/go.mod h1:TfhbxrfTC2JGuuIcpD7M5YqjuIsRgFG7qR5/FU/yRx8=
 github.com/lib/pq v1.10.9 h1:YXG7RB+JIjhP29X+OtkiDnYaXQwpS4JEWq7dtCCRUEw=
 github.com/lib/pq v1.10.9/go.mod h1:AlVN5x4E4T544tWzH6hKfbfQvm3HdbOxrmggDNAPY9o=
