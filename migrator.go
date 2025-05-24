@@ -14,6 +14,7 @@ import (
 	_ "github.com/lib/pq"
 )
 
+// Migrator struct
 type Migrator struct {
 	tableName  string       // Migration table name
 	db         *sql.DB      // Database
@@ -21,12 +22,14 @@ type Migrator struct {
 	migrations []*Migration // Migrations
 }
 
+// Create new Migrator struct return pointer
 func NewMigrator() *Migrator {
 	return &Migrator{
 		migrations: make([]*Migration, 0),
 	}
 }
 
+// Parse arguments
 func (m *Migrator) ParseArgs() {
 	m.cmd = cmd.NewCmd()
 	m.cmd.SetGreeting("Migration tool").
@@ -93,10 +96,12 @@ func (m *Migrator) ParseArgs() {
 		Parse(nil)
 }
 
+// Create migration
 func (m *Migrator) create() {
 	m.createMigration()
 }
 
+// Show migrations list
 func (m *Migrator) list() {
 	applied := make([]MigrationRecord, 0)
 	m.readMigrationsDir()
@@ -109,8 +114,8 @@ func (m *Migrator) list() {
 			applied = m.getAppliedMigrations()
 		}
 
-		for _, migration := range m.migrations {
-			tpl := "%s"
+		for index, migration := range m.migrations {
+			tpl := "[%d] %s"
 
 			if len(applied) > 0 {
 				for _, migrationRecord := range applied {
@@ -122,6 +127,7 @@ func (m *Migrator) list() {
 
 			m.print(fmt.Sprintf(
 				tpl+"\n",
+				index,
 				migration.name,
 			))
 		}
@@ -130,6 +136,7 @@ func (m *Migrator) list() {
 	}
 }
 
+// Apply migrations
 func (m *Migrator) up() {
 	m.readMigrationsDir()
 	m.initConnection()
@@ -137,6 +144,7 @@ func (m *Migrator) up() {
 	m.applyMigrations()
 }
 
+// Rollback migrations
 func (m *Migrator) down() {
 	m.readMigrationsDir()
 	m.initConnection()
@@ -266,6 +274,12 @@ func (m *Migrator) applyMigrations() {
 	}
 
 	appliedTime := time.Now()
+	tx, err := m.db.BeginTx(context.Background(), nil)
+	if err != nil {
+		m.print("can't initialize transaction")
+		return
+	}
+
 	for _, mig := range m.migrations {
 		isApplied := false
 
@@ -278,51 +292,50 @@ func (m *Migrator) applyMigrations() {
 		if !isApplied {
 			startTime := time.Now()
 			m.print(fmt.Sprintf("apply migration: %s\n", mig.name))
-			m.applyMigration(mig)
+			err = m.applyMigration(tx, mig)
+			if err != nil {
+				log.Printf("%+v\n", err.Error())
+				tx.Rollback()
+				return
+			}
 			m.print(fmt.Sprintf("migration applied %ds\n", time.Since(startTime)/time.Second))
 		}
 	}
+
+	err = tx.Commit()
+	if err != nil {
+		return
+	}
+
 	m.print(fmt.Sprintf("total applied %ds\n", time.Since(appliedTime)/time.Second))
 }
 
-func (m *Migrator) applyMigration(migration *Migration) {
+func (m *Migrator) applyMigration(tx *sql.Tx, migration *Migration) error {
 	if migration.up != "" {
-		ts, err := m.db.BeginTx(context.Background(), nil)
+		_, err := tx.Exec(migration.up)
 		if err != nil {
-			m.print("")
-			return
-		}
-
-		defer ts.Rollback()
-
-		_, err = ts.Exec(migration.up)
-		if err != nil {
-			log.Printf("%+v\n", err.Error())
-			return
+			m.print(fmt.Sprintf("%s migration error: %s\n", migration.name, err.Error()))
+			return err
 		}
 
 		hasher := crc32.NewIEEE()
 		hasher.Write([]byte(migration.name))
 		hashValue := hasher.Sum32()
 
-		_, err = ts.Exec(fmt.Sprintf(
+		_, err = tx.Exec(fmt.Sprintf(
 			"INSERT INTO %s (version, name) VALUES ('%d', '%s')",
 			m.tableName,
 			hashValue,
 			migration.name,
 		))
 		if err != nil {
-			log.Printf("%+v\n", err.Error())
-			return
-		}
-
-		err = ts.Commit()
-		if err != nil {
-			return
+			return err
 		}
 	} else {
 		m.print(fmt.Sprintf("%s migration empty\n", migration.name))
 	}
+
+	return nil
 }
 
 func (m *Migrator) rollbackMigrations() {
